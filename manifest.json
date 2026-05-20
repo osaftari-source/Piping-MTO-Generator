@@ -1,0 +1,16 @@
+{
+  "name": "PIM MTO Generator",
+  "short_name": "PIM MTO",
+  "description": "Piping Material Take-Off Generator for PIM Plant 1 & 2",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b141e",
+  "theme_color": "#0f1923",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
