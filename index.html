@@ -150,6 +150,8 @@ button{cursor:pointer;border:none;background:none}
       <div class="top-sub">Piping Material Take-Off</div>
     </div>
     <div class="top-actions">
+      <button class="top-btn" onclick="resetFormOnly()" type="button">Reset Form</button>
+      <button class="top-btn" onclick="newMTO()" type="button">New MTO</button>
       <button class="top-btn" onclick="exportCSV()">&#8595; CSV</button>
       <button class="top-btn" onclick="window.print()">&#8595; Print</button>
     </div>
@@ -166,10 +168,6 @@ button{cursor:pointer;border:none;background:none}
           <div class="field"><label>Document No.</label><input type="text" id="mto-docno" placeholder="NHST-PIM-MTO-001" oninput="autoSave()"></div>
           <div class="field"><label>Prepared By</label><input type="text" id="mto-prepby" placeholder="Name" oninput="autoSave()"></div>
           <div class="field"><label>Date</label><input type="date" id="mto-date" oninput="autoSave()"></div>
-        </div>
-        <div style="padding:0 14px 12px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="top-btn" onclick="resetFormOnly()" type="button">Reset Form</button>
-          <button class="top-btn" onclick="newMTO()" type="button">New MTO</button>
         </div>
       </div>
 
@@ -210,6 +208,19 @@ button{cursor:pointer;border:none;background:none}
           <label>Small / Branch Size (NPS)</label>
           <select id="sel-size-small" onchange="updatePreview()"><option value="">&#8212; Select Small Size &#8212;</option></select>
           <div class="field-note">Used for reducing tee, reducer, sockolet, thredolet, weldolet, etc.</div>
+        </div>
+        <div id="bolt-size-field" style="display:none">
+          <div class="info-grid">
+            <div class="field">
+              <label>Bolt Size / Thread (L Size)</label>
+              <input type="text" id="inp-bolt-size" placeholder='e.g. 3/4&quot;-UNC' oninput="updatePreview()">
+            </div>
+            <div class="field">
+              <label>Bolt Length (S Size, mm)</label>
+              <input type="text" id="inp-bolt-length" placeholder="e.g. 125" oninput="updatePreview()">
+            </div>
+          </div>
+          <div class="field-note" style="padding:0 14px 10px">Select the flange nominal size above, then input the matching bolt diameter/thread and length based on ASME flange standard.</div>
         </div>
         <div class="field">
           <label>Description Preview</label>
@@ -299,6 +310,7 @@ function sectionForPart(part,sections){
   return part;
 }
 function needsSmallSize(part){return TWO_SIZE_PARTS.has(part);}
+function needsBoltField(part){return part==='BOLT/NUT';}
 function normalizeClass(v){return String(v||'').replace(/ANSI\s*/i,'').replace(/API\s*/i,'').replace(/CL\.?\s*/i,'').trim();}
 function normalizeSchedule(v){v=String(v||'').trim();if(!v)return'';return v.replace(/SCH\.\s*/i,'SCH').replace(/SCH\s+/i,'SCH').replace(/STD/i,'STD').replace(/XXS/i,'XXS').replace(/XS/i,'XS');}
 function normalizeRef(v){return String(v||'').trim().replace(/\s+/g,' ');}
@@ -310,7 +322,7 @@ function fittingLabel(part){if(part==='REDUCING TEE')return'RED. TEE';if(part===
 function sizeWithSchedule(cd,sz){const ps=pipeSpec(cd,sz);return sz+'"'+(ps.sch?'-'+ps.sch:'');}
 function classPrefix(cls){cls=normalizeClass(cls);if(!cls)return'';return 'CL.'+cls;}
 
-function buildDesc(plant,cid,sz,part,smallSz){const cd=PMC_DATA[plant]?.[cid];if(!cd)return'';const sec=sectionForPart(part,cd.sections);const row=getRow(cd.sections,sec,sz);if(!row)return'';const S=sz+'"';
+function buildDesc(plant,cid,sz,part,smallSz,boltSize,boltLength){const cd=PMC_DATA[plant]?.[cid];if(!cd)return'';const sec=sectionForPart(part,cd.sections);const row=getRow(cd.sections,sec,sz);if(!row)return'';const S=sz+'"';
 const mat=fmtMat(row.material||row.body_trim||''),prod=cleanDash(row.product||''),end=cleanDash(row.end||row.end_type||''),wt=normalizeSchedule(row.wall_thick||''),ref=normalizeRef(row.ref||''),cls=normalizeClass(row.class||''),tf=cleanDash(row.type_face||''),bt=fmtMat(row.body_trim||''),et=cleanDash(row.end_type||''),vn=row.valve_no||'';
 if(part==='PIPE'){const ps=pipeSpec(cd,sz);return[sizeWithSchedule(cd,sz)+' PIPE',ps.mat,ps.prod,ps.end,ps.ref].filter(Boolean).join(', ');}
 if(sec===GENERIC_FITTING_SECTION){
@@ -330,7 +342,7 @@ if(part==='FLANGE')return[S+'-'+classPrefix(cls)+' FLANGE',mat,tf,ref].filter(Bo
 if(part==='BLIND FLANGE')return[S+'-'+classPrefix(cls)+' BLIND FLANGE',mat,tf||ref].filter(Boolean).join(', ');
 if(part==='STUB END')return[S+' STUB END',mat,end||cls,ref].filter(Boolean).join(', ');
 if(part==='GASKET')return[S+'-'+classPrefix(cls)+' GASKET',mat,tf,wt?'THK:'+wt:'',ref].filter(Boolean).join(', ');
-if(part==='BOLT/NUT')return[S+'-'+classPrefix(cls)+' BOLT & NUT',mat,row.type||'S.BOLT/HEX.NUT',ref].filter(Boolean).join(', ');
+if(part==='BOLT/NUT'){if(!boltSize||!boltLength)return'';return[boltSize+'*'+boltLength+'mm STUD BOLT&NUTS',mat,row.type||'S.BOLT/HEX.NUT',ref].filter(Boolean).join(', ');}
 if(needsSmallSize(part)){
   if(!smallSz)return'';
   return[smallSz+'"*'+S+'-'+classPrefix(cls)+' '+part,bt||mat,et,vn?'V/N:'+vn:'',ref].filter(Boolean).join(', ');
@@ -346,15 +358,17 @@ function showPage(p){currentPage=p;document.querySelectorAll('.page').forEach(el
 /* SELECTORS */
 function onPlantChange(){populateClasses();onClassChange();}
 function populateClasses(){const pl=document.getElementById('sel-plant').value;const sl=document.getElementById('sel-class');const cls=Object.keys(PMC_DATA[pl]||{}).sort();sl.innerHTML='<option value="">&#8212; Select Class &#8212;</option>'+cls.map(c=>'<option value="'+c+'">'+c+'</option>').join('');}
-function onClassChange(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value;const svc=PMC_DATA[pl]?.[cid]?.service||'';const sb=document.getElementById('svc-badge');if(svc){sb.style.display='block';sb.textContent='Service: '+svc;}else{sb.style.display='none';}const ss=document.getElementById('sel-size');ss.innerHTML='<option value="">&#8212; Select Size &#8212;</option>';if(cid)getSizes(pl,cid).forEach(s=>ss.innerHTML+='<option value="'+s+'">'+s+'"</option>');document.getElementById('sel-part').innerHTML='<option value="">&#8212; Select Part &#8212;</option>';hideSmallSize();updatePreview();}
-function onSizeChange(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value;const sp=document.getElementById('sel-part');sp.innerHTML='<option value="">&#8212; Select Part &#8212;</option>';if(cid&&sz){const secs=PMC_DATA[pl]?.[cid]?.sections||{};Object.keys(secs).forEach(s=>{if(s===GENERIC_FITTING_SECTION&&getRow(secs,s,sz)){GENERIC_FITTING_PARTS.forEach(fp=>sp.innerHTML+='<option value="'+fp+'">'+fp+'</option>');}else if(getRow(secs,s,sz)){sp.innerHTML+='<option value="'+s+'">'+s+'</option>';}});}hideSmallSize();updatePreview();}
-function onPartChange(){const p=document.getElementById('sel-part').value;if(p)document.getElementById('sel-unit').value=defUnit(p);setupSmallSize();updatePreview();}
+function onClassChange(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value;const svc=PMC_DATA[pl]?.[cid]?.service||'';const sb=document.getElementById('svc-badge');if(svc){sb.style.display='block';sb.textContent='Service: '+svc;}else{sb.style.display='none';}const ss=document.getElementById('sel-size');ss.innerHTML='<option value="">&#8212; Select Size &#8212;</option>';if(cid)getSizes(pl,cid).forEach(s=>ss.innerHTML+='<option value="'+s+'">'+s+'"</option>');document.getElementById('sel-part').innerHTML='<option value="">&#8212; Select Part &#8212;</option>';hideSmallSize();hideBoltSize();updatePreview();}
+function onSizeChange(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value;const sp=document.getElementById('sel-part');sp.innerHTML='<option value="">&#8212; Select Part &#8212;</option>';if(cid&&sz){const secs=PMC_DATA[pl]?.[cid]?.sections||{};Object.keys(secs).forEach(s=>{if(s===GENERIC_FITTING_SECTION&&getRow(secs,s,sz)){GENERIC_FITTING_PARTS.forEach(fp=>sp.innerHTML+='<option value="'+fp+'">'+fp+'</option>');}else if(getRow(secs,s,sz)){sp.innerHTML+='<option value="'+s+'">'+s+'</option>';}});}hideSmallSize();hideBoltSize();updatePreview();}
+function onPartChange(){const p=document.getElementById('sel-part').value;if(p)document.getElementById('sel-unit').value=defUnit(p);setupSmallSize();setupBoltSize();updatePreview();}
 function hideSmallSize(){const f=document.getElementById('small-size-field'),s=document.getElementById('sel-size-small');if(f)f.style.display='none';if(s)s.innerHTML='<option value="">&#8212; Select Small Size &#8212;</option>';}
+function hideBoltSize(){const f=document.getElementById('bolt-size-field');if(f)f.style.display='none';}
+function setupBoltSize(){const pt=document.getElementById('sel-part').value;const f=document.getElementById('bolt-size-field');if(!f)return;if(needsBoltField(pt)){f.style.display='block';}else{hideBoltSize();}}
 function setupSmallSize(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,large=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value;const f=document.getElementById('small-size-field'),s=document.getElementById('sel-size-small');if(!f||!s)return;if(!needsSmallSize(pt)){hideSmallSize();return;}const sizes=getSizes(pl,cid).filter(x=>!large||fracVal(x)<=fracVal(large));s.innerHTML='<option value="">&#8212; Select Small Size &#8212;</option>'+sizes.map(x=>'<option value="'+x+'">'+x+'"</option>').join('');f.style.display='block';}
-function updatePreview(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value,small=document.getElementById('sel-size-small')?.value||'';const el=document.getElementById('desc-preview');if(!cid||!sz||!pt){el.textContent='Select class, size and part above';el.className='desc-box empty';currentDesc='';return;}if(needsSmallSize(pt)&&!small){el.textContent='Select small / branch size for '+pt;el.className='desc-box empty';currentDesc='';return;}const d=buildDesc(pl,cid,sz,pt,small);currentDesc=d;el.textContent=d||'No specification found for this combination';el.className=d?'desc-box':'desc-box empty';}
+function updatePreview(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value,small=document.getElementById('sel-size-small')?.value||'',boltSize=document.getElementById('inp-bolt-size')?.value.trim()||'',boltLength=document.getElementById('inp-bolt-length')?.value.trim()||'';const el=document.getElementById('desc-preview');if(!cid||!sz||!pt){el.textContent='Select class, size and part above';el.className='desc-box empty';currentDesc='';return;}if(needsSmallSize(pt)&&!small){el.textContent='Select small / branch size for '+pt;el.className='desc-box empty';currentDesc='';return;}if(needsBoltField(pt)&&(!boltSize||!boltLength)){el.textContent='Input bolt size/thread and bolt length for BOLT/NUT';el.className='desc-box empty';currentDesc='';return;}const d=buildDesc(pl,cid,sz,pt,small,boltSize,boltLength);currentDesc=d;el.textContent=d||'No specification found for this combination';el.className=d?'desc-box':'desc-box empty';}
 
 /* ADD */
-function addItem(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value,small=document.getElementById('sel-size-small')?.value||'';if(!cid){showToast('Select a pipe class',true);return;}if(!sz){showToast('Select a nominal size',true);return;}if(!pt){showToast('Select a part',true);return;}if(needsSmallSize(pt)&&!small){showToast('Select small / branch size',true);return;}if(!currentDesc){showToast('No specification found',true);return;}itemSeq++;mtoItems.push({id:itemSeq,plant:pl,classId:cid,size:sz,sizeSmall:small,part:pt,description:currentDesc,qty:document.getElementById('inp-qty').value||'1',unit:document.getElementById('sel-unit').value,remarks:document.getElementById('inp-remarks').value.trim()});renderMTO();autoSave();showToast('Added to MTO \u2713');document.getElementById('inp-qty').value='';document.getElementById('inp-remarks').value='';}
+function addItem(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value,small=document.getElementById('sel-size-small')?.value||'',boltSize=document.getElementById('inp-bolt-size')?.value.trim()||'',boltLength=document.getElementById('inp-bolt-length')?.value.trim()||'';if(!cid){showToast('Select a pipe class',true);return;}if(!sz){showToast('Select a nominal size',true);return;}if(!pt){showToast('Select a part',true);return;}if(needsSmallSize(pt)&&!small){showToast('Select small / branch size',true);return;}if(needsBoltField(pt)&&(!boltSize||!boltLength)){showToast('Input bolt size/thread and bolt length',true);return;}if(!currentDesc){showToast('No specification found',true);return;}itemSeq++;mtoItems.push({id:itemSeq,plant:pl,classId:cid,size:sz,sizeSmall:small,boltSize:boltSize,boltLength:boltLength,part:pt,description:currentDesc,qty:document.getElementById('inp-qty').value||'1',unit:document.getElementById('sel-unit').value,remarks:document.getElementById('inp-remarks').value.trim()});renderMTO();autoSave();showToast('Added to MTO \u2713');document.getElementById('inp-qty').value='';document.getElementById('inp-remarks').value='';}
 
 /* RENDER MTO */
 function renderMTO(){
@@ -375,15 +389,15 @@ function renderMTO(){
     const id=item.id || (i+1);
     const plant=item.plant || item.pl || '';
     const classId=item.classId || item.class || item.cid || '';
-    const size=item.size || item.largeSize || item.sz || '';
-    const sizeSmall=item.sizeSmall || item.smallSize || '';
+    const size=(item.part==='BOLT/NUT' ? (item.boltSize||item.size||item.largeSize||item.sz||'') : (item.size || item.largeSize || item.sz || ''));
+    const sizeSmall=(item.part==='BOLT/NUT' ? (item.boltLength||item.sizeSmall||item.smallSize||'') : (item.sizeSmall || item.smallSize || item.size || ''));
     const part=item.part || '';
     const desc=item.description || item.desc || '';
     const qty=item.qty || '1';
     const unit=item.unit || defUnit(part);
     const remarks=item.remarks || '';
     const plantClass=String(plant).toLowerCase().replace(/[^a-z0-9_-]/g,'');
-    const sizeText=escH(size)+(sizeSmall?'" x '+escH(sizeSmall):'')+(size?'"':'');
+    const sizeText=(item.part==='BOLT/NUT') ? (escH(size)+(sizeSmall?' x '+escH(sizeSmall)+'mm':'')) : (escH(size)+(sizeSmall?'" x '+escH(sizeSmall):'')+(size?'"':''));
     return '<div class="mto-row"><div class="mto-row-head"><span class="mto-row-no">'+(i+1)+'</span><div class="mto-row-tags"><span class="badge b-'+plantClass+'">'+escH(plant)+'</span><span class="badge b-class">'+escH(classId)+'</span><span class="badge b-size">'+sizeText+'</span></div><button class="mto-row-del" onclick="removeItem('+id+')">&#10005;</button></div><div class="mto-desc">'+escH(desc)+'</div><div class="mto-row-foot"><div class="qty-wrap"><label>Qty</label><input type="number" min="0" step="0.01" value="'+escH(qty)+'" onchange="updateItem('+id+',\'qty\',this.value)"><span class="unit-lbl">'+escH(unit)+'</span></div><div class="rmk-wrap"><input type="text" value="'+escH(remarks)+'" onchange="updateItem('+id+',\'remarks\',this.value)" placeholder="Remarks..."></div></div></div>';
   }).join('');
   list.innerHTML='';
@@ -393,15 +407,15 @@ function renderMTO(){
 function updateItem(id,f,v){const i=mtoItems.find(x=>x.id===id);if(i){i[f]=v;autoSave();}}
 function removeItem(id){mtoItems=mtoItems.filter(i=>i.id!==id);renderMTO();autoSave();showToast('Item removed');}
 function clearAll(){if(!mtoItems.length)return;if(!confirm('Clear all '+mtoItems.length+' items?'))return;mtoItems=[];renderMTO();autoSave();}
-function resetFormOnly(){['mto-title','mto-docno','mto-prepby','tbl-iso','tbl-lineno','tbl-pid','tbl-rev','inp-qty','inp-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const d=document.getElementById('mto-date');if(d)d.value=new Date().toISOString().split('T')[0];autoSave();renderMTO();showToast('Form reset. MTO items kept.');}
-function newMTO(){if(!confirm('Start a new MTO? This clears items and saved project fields on this device.'))return;mtoItems=[];itemSeq=0;localStorage.removeItem('pim_mto_v2');['mto-title','mto-docno','mto-prepby','tbl-iso','tbl-lineno','tbl-pid','tbl-rev','inp-qty','inp-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const d=document.getElementById('mto-date');if(d)d.value=new Date().toISOString().split('T')[0];renderMTO();showToast('New MTO started');}
+function resetFormOnly(){['mto-title','mto-docno','mto-prepby','tbl-iso','tbl-lineno','tbl-pid','tbl-rev','inp-qty','inp-remarks','inp-bolt-size','inp-bolt-length'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const d=document.getElementById('mto-date');if(d)d.value=new Date().toISOString().split('T')[0];autoSave();renderMTO();showToast('Form reset. MTO items kept.');}
+function newMTO(){if(!confirm('Start a new MTO? This clears items and saved project fields on this device.'))return;mtoItems=[];itemSeq=0;localStorage.removeItem('pim_mto_v2');['mto-title','mto-docno','mto-prepby','tbl-iso','tbl-lineno','tbl-pid','tbl-rev','inp-qty','inp-remarks','inp-bolt-size','inp-bolt-length'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const d=document.getElementById('mto-date');if(d)d.value=new Date().toISOString().split('T')[0];renderMTO();showToast('New MTO started');}
 
 /* STORAGE */
 function autoSave(){try{const s={items:mtoItems,seq:itemSeq,title:document.getElementById('mto-title').value,docno:document.getElementById('mto-docno').value,prepby:document.getElementById('mto-prepby').value,date:document.getElementById('mto-date').value,iso:document.getElementById('tbl-iso').value,lineno:document.getElementById('tbl-lineno').value,pid:document.getElementById('tbl-pid').value,rev:document.getElementById('tbl-rev').value};localStorage.setItem('pim_mto_v2',JSON.stringify(s));}catch(e){}}
 function loadSaved(){try{const raw=localStorage.getItem('pim_mto_v2');if(!raw)return;const s=JSON.parse(raw);mtoItems=Array.isArray(s.items)?s.items.filter(Boolean).map((it,idx)=>({...it,id:it.id||(idx+1)})):[];itemSeq=s.seq||mtoItems.length;['title','docno','prepby','date'].forEach(k=>{if(s[k])document.getElementById('mto-'+k).value=s[k];});['iso','lineno','pid','rev'].forEach(k=>{if(s[k])document.getElementById('tbl-'+k).value=s[k];});renderMTO();}catch(e){console.warn('Saved MTO could not be loaded',e);localStorage.removeItem('pim_mto_v2');mtoItems=[];itemSeq=0;renderMTO();}}
 
 /* EXPORT */
-function exportCSV(){if(!mtoItems.length){showToast('No items to export',true);return;}const title=document.getElementById('mto-title').value||'MTO';const iso=document.getElementById('tbl-iso').value,ln=document.getElementById('tbl-lineno').value,pid=document.getElementById('tbl-pid').value,rev=document.getElementById('tbl-rev').value,prepby=document.getElementById('mto-prepby').value,date=document.getElementById('mto-date').value;const hdr=['No.','Plant','Pipe Class','Large Size (NPS)','Small Size (NPS)','Part','Description','Qty','Unit','ISO Drawing','Line No.','P&ID No.','Rev.','Remarks'];const rows=mtoItems.map((item,i)=>[i+1,item.plant,item.classId,item.size+'"',item.sizeSmall?item.sizeSmall+'"':'',item.part,item.description,item.qty,item.unit,iso,ln,pid,rev,item.remarks]);const csv=[['DETAIL MTO PIPING MATERIAL'],['Title: '+title,'Doc No: '+document.getElementById('mto-docno').value,'Prepared By: '+prepby,'Date: '+date],[],hdr,...rows].map(r=>r.map(c=>'"'+String(c||'').replace(/"/g,'""')+'"').join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(title.replace(/[^a-zA-Z0-9_\-]/g,'_')||'MTO')+'.csv';a.click();URL.revokeObjectURL(url);showToast('Exported \u2713');}
+function exportCSV(){if(!mtoItems.length){showToast('No items to export',true);return;}const title=document.getElementById('mto-title').value||'MTO';const iso=document.getElementById('tbl-iso').value,ln=document.getElementById('tbl-lineno').value,pid=document.getElementById('tbl-pid').value,rev=document.getElementById('tbl-rev').value,prepby=document.getElementById('mto-prepby').value,date=document.getElementById('mto-date').value;const hdr=['No.','Plant','Pipe Class','Large Size (NPS)','Small Size (NPS)','Part','Description','Qty','Unit','ISO Drawing','Line No.','P&ID No.','Rev.','Remarks'];const rows=mtoItems.map((item,i)=>{const l=item.part==='BOLT/NUT'?(item.boltSize||item.size):(item.size+'"');const s=item.part==='BOLT/NUT'?(item.boltLength||item.sizeSmall||item.size):(item.sizeSmall?item.sizeSmall+'"':item.size+'"');return[i+1,item.plant,item.classId,l,s,item.part,item.description,item.qty,item.unit,iso,ln,pid,rev,item.remarks];});const csv=[['DETAIL MTO PIPING MATERIAL'],['Title: '+title,'Doc No: '+document.getElementById('mto-docno').value,'Prepared By: '+prepby,'Date: '+date],[],hdr,...rows].map(r=>r.map(c=>'"'+String(c||'').replace(/"/g,'""')+'"').join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(title.replace(/[^a-zA-Z0-9_\-]/g,'_')||'MTO')+'.csv';a.click();URL.revokeObjectURL(url);showToast('Exported \u2713');}
 
 /* TOAST */
 function showToast(msg,isErr){const el=document.getElementById('toast');el.textContent=msg;el.className='toast'+(isErr?' err':'');void el.offsetWidth;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500);}
