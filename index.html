@@ -167,6 +167,10 @@ button{cursor:pointer;border:none;background:none}
           <div class="field"><label>Prepared By</label><input type="text" id="mto-prepby" placeholder="Name" oninput="autoSave()"></div>
           <div class="field"><label>Date</label><input type="date" id="mto-date" oninput="autoSave()"></div>
         </div>
+        <div style="padding:0 14px 12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="top-btn" onclick="resetFormOnly()" type="button">Reset Form</button>
+          <button class="top-btn" onclick="newMTO()" type="button">New MTO</button>
+        </div>
       </div>
 
       <div class="section">Line Reference</div>
@@ -353,15 +357,48 @@ function updatePreview(){const pl=document.getElementById('sel-plant').value,cid
 function addItem(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value,small=document.getElementById('sel-size-small')?.value||'';if(!cid){showToast('Select a pipe class',true);return;}if(!sz){showToast('Select a nominal size',true);return;}if(!pt){showToast('Select a part',true);return;}if(needsSmallSize(pt)&&!small){showToast('Select small / branch size',true);return;}if(!currentDesc){showToast('No specification found',true);return;}itemSeq++;mtoItems.push({id:itemSeq,plant:pl,classId:cid,size:sz,sizeSmall:small,part:pt,description:currentDesc,qty:document.getElementById('inp-qty').value||'1',unit:document.getElementById('sel-unit').value,remarks:document.getElementById('inp-remarks').value.trim()});renderMTO();autoSave();showToast('Added to MTO \u2713');document.getElementById('inp-qty').value='';document.getElementById('inp-remarks').value='';}
 
 /* RENDER MTO */
-function renderMTO(){const list=document.getElementById('mto-list'),empty=document.getElementById('mto-empty');document.getElementById('item-count').textContent=mtoItems.length;document.getElementById('mto-title-display').textContent=document.getElementById('mto-title').value||'';if(!mtoItems.length){list.innerHTML='';list.appendChild(empty);empty.style.display='block';return;}empty.style.display='none';const card=document.createElement('div');card.className='card';card.innerHTML=mtoItems.map((item,i)=>'<div class="mto-row"><div class="mto-row-head"><span class="mto-row-no">'+(i+1)+'</span><div class="mto-row-tags"><span class="badge b-'+item.plant.toLowerCase()+'">'+escH(item.plant)+'</span><span class="badge b-class">'+escH(item.classId)+'</span><span class="badge b-size">'+escH(item.size)+(item.sizeSmall?'" x '+escH(item.sizeSmall):'')+'"</span></div><button class="mto-row-del" onclick="removeItem('+item.id+')">&#10005;</button></div><div class="mto-desc">'+escH(item.description)+'</div><div class="mto-row-foot"><div class="qty-wrap"><label>Qty</label><input type="number" min="0" step="0.01" value="'+escH(item.qty)+'" onchange="updateItem('+item.id+',\'qty\',this.value)"><span class="unit-lbl">'+escH(item.unit)+'</span></div><div class="rmk-wrap"><input type="text" value="'+escH(item.remarks)+'" onchange="updateItem('+item.id+',\'remarks\',this.value)" placeholder="Remarks..."></div></div></div>').join('');list.innerHTML='';list.appendChild(card);}
+function renderMTO(){
+  const list=document.getElementById('mto-list');
+  const empty=document.getElementById('mto-empty') || (()=>{const e=document.createElement('div');e.className='empty';e.id='mto-empty';e.innerHTML='<div class="empty-icon">&#128295;</div><h3>No Items Yet</h3><p>Go to the Add tab to start building your MTO</p>';return e;})();
+  const safeItems=(Array.isArray(mtoItems)?mtoItems:[]).filter(Boolean);
+  document.getElementById('item-count').textContent=safeItems.length;
+  document.getElementById('mto-title-display').textContent=document.getElementById('mto-title').value||'';
+  if(!safeItems.length){
+    list.innerHTML='';
+    empty.style.display='block';
+    list.appendChild(empty);
+    return;
+  }
+  const card=document.createElement('div');
+  card.className='card';
+  card.innerHTML=safeItems.map((item,i)=>{
+    const id=item.id || (i+1);
+    const plant=item.plant || item.pl || '';
+    const classId=item.classId || item.class || item.cid || '';
+    const size=item.size || item.largeSize || item.sz || '';
+    const sizeSmall=item.sizeSmall || item.smallSize || '';
+    const part=item.part || '';
+    const desc=item.description || item.desc || '';
+    const qty=item.qty || '1';
+    const unit=item.unit || defUnit(part);
+    const remarks=item.remarks || '';
+    const plantClass=String(plant).toLowerCase().replace(/[^a-z0-9_-]/g,'');
+    const sizeText=escH(size)+(sizeSmall?'" x '+escH(sizeSmall):'')+(size?'"':'');
+    return '<div class="mto-row"><div class="mto-row-head"><span class="mto-row-no">'+(i+1)+'</span><div class="mto-row-tags"><span class="badge b-'+plantClass+'">'+escH(plant)+'</span><span class="badge b-class">'+escH(classId)+'</span><span class="badge b-size">'+sizeText+'</span></div><button class="mto-row-del" onclick="removeItem('+id+')">&#10005;</button></div><div class="mto-desc">'+escH(desc)+'</div><div class="mto-row-foot"><div class="qty-wrap"><label>Qty</label><input type="number" min="0" step="0.01" value="'+escH(qty)+'" onchange="updateItem('+id+',\'qty\',this.value)"><span class="unit-lbl">'+escH(unit)+'</span></div><div class="rmk-wrap"><input type="text" value="'+escH(remarks)+'" onchange="updateItem('+id+',\'remarks\',this.value)" placeholder="Remarks..."></div></div></div>';
+  }).join('');
+  list.innerHTML='';
+  list.appendChild(card);
+}
 
 function updateItem(id,f,v){const i=mtoItems.find(x=>x.id===id);if(i){i[f]=v;autoSave();}}
 function removeItem(id){mtoItems=mtoItems.filter(i=>i.id!==id);renderMTO();autoSave();showToast('Item removed');}
 function clearAll(){if(!mtoItems.length)return;if(!confirm('Clear all '+mtoItems.length+' items?'))return;mtoItems=[];renderMTO();autoSave();}
+function resetFormOnly(){['mto-title','mto-docno','mto-prepby','tbl-iso','tbl-lineno','tbl-pid','tbl-rev','inp-qty','inp-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const d=document.getElementById('mto-date');if(d)d.value=new Date().toISOString().split('T')[0];autoSave();renderMTO();showToast('Form reset. MTO items kept.');}
+function newMTO(){if(!confirm('Start a new MTO? This clears items and saved project fields on this device.'))return;mtoItems=[];itemSeq=0;localStorage.removeItem('pim_mto_v2');['mto-title','mto-docno','mto-prepby','tbl-iso','tbl-lineno','tbl-pid','tbl-rev','inp-qty','inp-remarks'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});const d=document.getElementById('mto-date');if(d)d.value=new Date().toISOString().split('T')[0];renderMTO();showToast('New MTO started');}
 
 /* STORAGE */
 function autoSave(){try{const s={items:mtoItems,seq:itemSeq,title:document.getElementById('mto-title').value,docno:document.getElementById('mto-docno').value,prepby:document.getElementById('mto-prepby').value,date:document.getElementById('mto-date').value,iso:document.getElementById('tbl-iso').value,lineno:document.getElementById('tbl-lineno').value,pid:document.getElementById('tbl-pid').value,rev:document.getElementById('tbl-rev').value};localStorage.setItem('pim_mto_v2',JSON.stringify(s));}catch(e){}}
-function loadSaved(){try{const raw=localStorage.getItem('pim_mto_v2');if(!raw)return;const s=JSON.parse(raw);mtoItems=s.items||[];itemSeq=s.seq||mtoItems.length;['title','docno','prepby','date'].forEach(k=>{if(s[k])document.getElementById('mto-'+k).value=s[k];});['iso','lineno','pid','rev'].forEach(k=>{if(s[k])document.getElementById('tbl-'+k).value=s[k];});renderMTO();}catch(e){}}
+function loadSaved(){try{const raw=localStorage.getItem('pim_mto_v2');if(!raw)return;const s=JSON.parse(raw);mtoItems=Array.isArray(s.items)?s.items.filter(Boolean).map((it,idx)=>({...it,id:it.id||(idx+1)})):[];itemSeq=s.seq||mtoItems.length;['title','docno','prepby','date'].forEach(k=>{if(s[k])document.getElementById('mto-'+k).value=s[k];});['iso','lineno','pid','rev'].forEach(k=>{if(s[k])document.getElementById('tbl-'+k).value=s[k];});renderMTO();}catch(e){console.warn('Saved MTO could not be loaded',e);localStorage.removeItem('pim_mto_v2');mtoItems=[];itemSeq=0;renderMTO();}}
 
 /* EXPORT */
 function exportCSV(){if(!mtoItems.length){showToast('No items to export',true);return;}const title=document.getElementById('mto-title').value||'MTO';const iso=document.getElementById('tbl-iso').value,ln=document.getElementById('tbl-lineno').value,pid=document.getElementById('tbl-pid').value,rev=document.getElementById('tbl-rev').value,prepby=document.getElementById('mto-prepby').value,date=document.getElementById('mto-date').value;const hdr=['No.','Plant','Pipe Class','Large Size (NPS)','Small Size (NPS)','Part','Description','Qty','Unit','ISO Drawing','Line No.','P&ID No.','Rev.','Remarks'];const rows=mtoItems.map((item,i)=>[i+1,item.plant,item.classId,item.size+'"',item.sizeSmall?item.sizeSmall+'"':'',item.part,item.description,item.qty,item.unit,iso,ln,pid,rev,item.remarks]);const csv=[['DETAIL MTO PIPING MATERIAL'],['Title: '+title,'Doc No: '+document.getElementById('mto-docno').value,'Prepared By: '+prepby,'Date: '+date],[],hdr,...rows].map(r=>r.map(c=>'"'+String(c||'').replace(/"/g,'""')+'"').join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(title.replace(/[^a-zA-Z0-9_\-]/g,'_')||'MTO')+'.csv';a.click();URL.revokeObjectURL(url);showToast('Exported \u2713');}
