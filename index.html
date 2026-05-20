@@ -103,6 +103,7 @@ button{cursor:pointer;border:none;background:none}
 .empty h3{font-size:15px;font-weight:700;color:#5f5e5a;margin-bottom:6px}
 
 /* STATUS BAR */
+.help-note{font-size:12px;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:12px;padding:10px 12px;margin:8px 12px 12px;line-height:1.45}
 .stat-bar{padding:8px 14px;border-bottom:.5px solid var(--line-soft);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);background:#fafaf8}
 .stat-count{font-weight:700;color:var(--blue)}
 
@@ -147,12 +148,13 @@ button{cursor:pointer;border:none;background:none}
   <div class="topbar">
     <div>
       <h1>&#128295; PIM MTO</h1>
-      <div class="top-sub">Piping Material Take-Off</div>
+      <div class="top-sub">Piping Material Take-Off &bull; Trial v2.3</div>
     </div>
     <div class="top-actions">
       <button class="top-btn" onclick="resetFormOnly()" type="button">Reset Form</button>
       <button class="top-btn" onclick="newMTO()" type="button">New MTO</button>
-      <button class="top-btn" onclick="exportCSV()">&#8595; CSV</button>
+      <button class="top-btn" onclick="exportCSV(',')" title="Use this if your Excel opens CSV into separate columns with comma delimiter">&#8595; CSV (,)</button>
+      <button class="top-btn" onclick="exportCSV(';')" title="Use this if CSV opens as one long text line in Excel / Indonesian regional settings">&#8595; CSV (;)</button>
       <button class="top-btn" onclick="window.print()">&#8595; Print</button>
     </div>
   </div>
@@ -262,6 +264,7 @@ button{cursor:pointer;border:none;background:none}
       <span id="mto-title-display" style="color:#5f5e5a;font-size:12px;font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
       <button class="danger-btn" onclick="clearAll()" style="padding:3px 8px;font-size:12px">Clear All</button>
     </div>
+    <div class="help-note"><b>CSV delimiter:</b> pilih <b>CSV (,)</b> jika Excel Anda langsung memisahkan kolom dengan koma. Pilih <b>CSV (;)</b> jika hasil CSV terbuka sebagai satu baris teks panjang atau Excel menggunakan regional Indonesia.</div>
     <div id="mto-list">
       <div class="empty" id="mto-empty">
         <div class="empty-icon">&#128295;</div>
@@ -331,7 +334,7 @@ if(sec===GENERIC_FITTING_SECTION){
   const rowEnd=end==='BE'?'BW':end;
   if(needsSmallSize(part)){
     if(!smallSz)return'';
-    return[sizeWithSchedule(cd,sz)+'*'+sizeWithSchedule(cd,smallSz)+' '+label,mat,prod,rowEnd,rowRef].filter(Boolean).join(', ');
+    return[sizeWithSchedule(cd,sz)+' X '+sizeWithSchedule(cd,smallSz)+' '+label,mat,prod,rowEnd,rowRef].filter(Boolean).join(', ');
   }
   return[sizeWithSchedule(cd,sz)+' '+label,mat,prod,rowEnd,rowRef].filter(Boolean).join(', ');
 }
@@ -342,10 +345,10 @@ if(part==='FLANGE')return[S+'-'+classPrefix(cls)+' FLANGE',mat,tf,ref].filter(Bo
 if(part==='BLIND FLANGE')return[S+'-'+classPrefix(cls)+' BLIND FLANGE',mat,tf||ref].filter(Boolean).join(', ');
 if(part==='STUB END')return[S+' STUB END',mat,end||cls,ref].filter(Boolean).join(', ');
 if(part==='GASKET')return[S+'-'+classPrefix(cls)+' GASKET',mat,tf,wt?'THK:'+wt:'',ref].filter(Boolean).join(', ');
-if(part==='BOLT/NUT'){if(!boltSize||!boltLength)return'';return[boltSize+'*'+boltLength+'mm STUD BOLT&NUTS',mat,row.type||'S.BOLT/HEX.NUT',ref].filter(Boolean).join(', ');}
+if(part==='BOLT/NUT'){if(!boltSize||!boltLength)return'';return[boltSize+' X '+boltLength+'mm STUD BOLT & NUTS',mat,row.type||'S.BOLT/HEX.NUT',ref].filter(Boolean).join(', ');}
 if(needsSmallSize(part)){
   if(!smallSz)return'';
-  return[smallSz+'"*'+S+'-'+classPrefix(cls)+' '+part,bt||mat,et,vn?'V/N:'+vn:'',ref].filter(Boolean).join(', ');
+  return[smallSz+'" X '+S+'-'+classPrefix(cls)+' '+part,bt||mat,et,vn?'V/N:'+vn:'',ref].filter(Boolean).join(', ');
 }
 return[S+'-'+classPrefix(cls)+' '+part,bt||mat,et,vn?'V/N:'+vn:'',ref].filter(Boolean).join(', ');}
 
@@ -415,7 +418,35 @@ function autoSave(){try{const s={items:mtoItems,seq:itemSeq,title:document.getEl
 function loadSaved(){try{const raw=localStorage.getItem('pim_mto_v2');if(!raw)return;const s=JSON.parse(raw);mtoItems=Array.isArray(s.items)?s.items.filter(Boolean).map((it,idx)=>({...it,id:it.id||(idx+1)})):[];itemSeq=s.seq||mtoItems.length;['title','docno','prepby','date'].forEach(k=>{if(s[k])document.getElementById('mto-'+k).value=s[k];});['iso','lineno','pid','rev'].forEach(k=>{if(s[k])document.getElementById('tbl-'+k).value=s[k];});renderMTO();}catch(e){console.warn('Saved MTO could not be loaded',e);localStorage.removeItem('pim_mto_v2');mtoItems=[];itemSeq=0;renderMTO();}}
 
 /* EXPORT */
-function exportCSV(){if(!mtoItems.length){showToast('No items to export',true);return;}const title=document.getElementById('mto-title').value||'MTO';const iso=document.getElementById('tbl-iso').value,ln=document.getElementById('tbl-lineno').value,pid=document.getElementById('tbl-pid').value,rev=document.getElementById('tbl-rev').value,prepby=document.getElementById('mto-prepby').value,date=document.getElementById('mto-date').value;const hdr=['No.','Plant','Pipe Class','Large Size (NPS)','Small Size (NPS)','Part','Description','Qty','Unit','ISO Drawing','Line No.','P&ID No.','Rev.','Remarks'];const rows=mtoItems.map((item,i)=>{const l=item.part==='BOLT/NUT'?(item.boltSize||item.size):(item.size+'"');const s=item.part==='BOLT/NUT'?(item.boltLength||item.sizeSmall||item.size):(item.sizeSmall?item.sizeSmall+'"':item.size+'"');return[i+1,item.plant,item.classId,l,s,item.part,item.description,item.qty,item.unit,iso,ln,pid,rev,item.remarks];});const csv=[['DETAIL MTO PIPING MATERIAL'],['Title: '+title,'Doc No: '+document.getElementById('mto-docno').value,'Prepared By: '+prepby,'Date: '+date],[],hdr,...rows].map(r=>r.map(c=>'"'+String(c||'').replace(/"/g,'""')+'"').join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(title.replace(/[^a-zA-Z0-9_\-]/g,'_')||'MTO')+'.csv';a.click();URL.revokeObjectURL(url);showToast('Exported \u2713');}
+function exportCSV(delimiter=','){
+  if(!mtoItems.length){showToast('No items to export',true);return;}
+  const title=document.getElementById('mto-title').value||'MTO';
+  const iso=document.getElementById('tbl-iso').value;
+  const ln=document.getElementById('tbl-lineno').value;
+  const pid=document.getElementById('tbl-pid').value;
+  const rev=document.getElementById('tbl-rev').value;
+  const prepby=document.getElementById('mto-prepby').value;
+  const date=document.getElementById('mto-date').value;
+  const docno=document.getElementById('mto-docno').value;
+  const hdr=['No.','Plant','Pipe Class','Large Size (NPS)','Small Size (NPS)','Part','Description','Qty','Unit','ISO Drawing','Line No.','P&ID No.','Rev.','Remarks'];
+  const rows=mtoItems.map((item,i)=>{
+    const largeSize=(item.part==='BOLT/NUT') ? (item.boltSize||item.size||'') : ((item.size||item.largeSize||'')+'"');
+    const smallSize=(item.part==='BOLT/NUT') ? (item.boltLength||item.sizeSmall||item.smallSize||item.size||'') : ((item.sizeSmall||item.smallSize||item.size||item.largeSize||'')+'"');
+    return[i+1,item.plant,item.classId,largeSize,smallSize,item.part,item.description,item.qty,item.unit,iso,ln,pid,rev,item.remarks];
+  });
+  const q=(c)=>'"'+String(c??'').replace(/"/g,'""')+'"';
+  const csv=[['DETAIL MTO PIPING MATERIAL'],['Title: '+title,'Doc No: '+docno,'Prepared By: '+prepby,'Date: '+date],[],hdr,...rows]
+    .map(r=>r.map(q).join(delimiter)).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  const suffix=delimiter===';'?'_semicolon':'_comma';
+  a.download=(title.replace(/[^a-zA-Z0-9_\-]/g,'_')||'MTO')+suffix+'.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Exported CSV '+(delimiter===';'?'semicolon':'comma')+' âœ“');
+}
 
 /* TOAST */
 function showToast(msg,isErr){const el=document.getElementById('toast');el.textContent=msg;el.className='toast'+(isErr?' err':'');void el.offsetWidth;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500);}
