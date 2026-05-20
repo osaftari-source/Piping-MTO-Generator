@@ -1,4 +1,4 @@
-const CACHE = 'pim-mto-v2';
+const CACHE = 'pim-mto-v2-2';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.svg'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));
