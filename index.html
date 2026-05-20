@@ -47,6 +47,7 @@ button{cursor:pointer;border:none;background:none}
 .field select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23888780' d='M5 7L1 2h8z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--blue)}
 .field select option{background:#fff}
+.field-note{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.4}
 
 /* SERVICE BADGE */
 .svc-badge{margin:0 14px 10px;padding:8px 10px;background:var(--green-soft);border-radius:8px;font-size:12px;color:var(--green);font-weight:600;display:none}
@@ -193,12 +194,18 @@ button{cursor:pointer;border:none;background:none}
         </div>
         <div class="svc-badge" id="svc-badge"></div>
         <div class="field">
-          <label>Nominal Size (NPS)</label>
+          <label>Large / Main Size (NPS)</label>
           <select id="sel-size" onchange="onSizeChange()"><option value="">&#8212; Select Size &#8212;</option></select>
         </div>
         <div class="field">
           <label>Part / Component</label>
           <select id="sel-part" onchange="onPartChange()"><option value="">&#8212; Select Part &#8212;</option></select>
+          <div class="field-note" id="part-note">For reducers/reducing tees/olets, choose the specific component and input the small/branch size.</div>
+        </div>
+        <div class="field" id="small-size-field" style="display:none">
+          <label>Small / Branch Size (NPS)</label>
+          <select id="sel-size-small" onchange="updatePreview()"><option value="">&#8212; Select Small Size &#8212;</option></select>
+          <div class="field-note">Used for reducing tee, reducer, sockolet, thredolet, weldolet, etc.</div>
         </div>
         <div class="field">
           <label>Description Preview</label>
@@ -274,24 +281,57 @@ function normSize(s){s=String(s).trim();s=s.replace(/(\d+)\s+(\d+\/\d+)/g,'$1-$2
 function fracVal(s){s=normSize(String(s).trim());if(s.includes('/')&&!s.includes('-')){const[a,b]=s.split('/');return parseFloat(a)/parseFloat(b);}if(s.includes('-')){const p=s.split('-');const v=parseFloat(p[0]);if(!isNaN(v))return v+fracVal(p.slice(1).join('-'));}const f=parseFloat(s);return isNaN(f)?-1:f;}
 const PCLS=new Set(["125","150","300","400","600","800","1500","2500","3000","6000","9000"]);
 function isSizeLike(s){s=s.trim();const m=s.match(/^([\d\/\-\s]+)\s*-\s*([\d\/\s]+)$/);if(m){const lo=normSize(m[1].trim()),hi=normSize(m[2].trim());if(PCLS.has(lo)||PCLS.has(hi))return false;const fl=fracVal(lo),fh=fracVal(hi);return fl>0&&fh>0&&fl<=fh&&fh<=64;}const ns=normSize(s);if(PCLS.has(ns))return false;const f=fracVal(ns);return f>=0.25&&f<=64;}
-function sizeInRange(sz,rng){rng=rng.trim().replace(/[–—]/g,'-');const m=rng.match(/^([\d\/\-\s]+)\s*-\s*([\d\/\s]+)$/);if(m){const lo=fracVal(normSize(m[1].trim())),hi=fracVal(normSize(m[2].trim())),sv=fracVal(normSize(sz));return lo>0&&lo<=sv&&sv<=hi;}return Math.abs(fracVal(normSize(rng))-fracVal(normSize(sz)))<0.01;}
+function sizeInRange(sz,rng){rng=rng.trim().replace(/[â€“â€”]/g,'-');const m=rng.match(/^([\d\/\-\s]+)\s*-\s*([\d\/\s]+)$/);if(m){const lo=fracVal(normSize(m[1].trim())),hi=fracVal(normSize(m[2].trim())),sv=fracVal(normSize(sz));return lo>0&&lo<=sv&&sv<=hi;}return Math.abs(fracVal(normSize(rng))-fracVal(normSize(sz)))<0.01;}
 function getRow(sections,sec,sz){const rows=sections[sec];if(!rows)return null;for(const r of rows){if(r.range==='all'||sizeInRange(sz,r.range))return r;}return null;}
+function getSizes(plant,cid){const secs=PMC_DATA[plant]?.[cid]?.sections||{};const rows=secs.PIPE||[];const ss=new Set();for(const r of rows){if(r.range==='all'){STD_SIZES.forEach(s=>ss.add(s));break;}const m=r.range.match(/^([\d\/\-\s]+)\s*-\s*([\d\/\s]+)$/);if(m){const lo=fracVal(normSize(m[1].trim())),hi=fracVal(normSize(m[2].trim()));STD_SIZES.forEach(s=>{const v=fracVal(normSize(s));if(v>=lo&&v<=hi)ss.add(s);});}else{ss.add(r.range.trim());}}return STD_SIZES.filter(s=>ss.has(s));}
 
-function getSizes(plant,cid){const cd=PMC_DATA[plant]?.[cid];if(!cd)return[];const rows=cd.sections['PIPE']||[];const ss=new Set();for(const r of rows){if(r.range==='all'){STD_SIZES.forEach(s=>ss.add(s));break;}const m=r.range.match(/^([\d\/\-\s]+)\s*-\s*([\d\/\s]+)$/);if(m){const lo=fracVal(normSize(m[1].trim())),hi=fracVal(normSize(m[2].trim()));STD_SIZES.forEach(s=>{const v=fracVal(normSize(s));if(v>=lo&&v<=hi)ss.add(s);});}else{ss.add(r.range.trim());}}return STD_SIZES.filter(s=>ss.has(s));}
+/* MTO description generator helpers */
+const GENERIC_FITTING_SECTION='ELBOW/TEE/REDUCER/CAP';
+const GENERIC_FITTING_PARTS=['90 ELBOW','45 ELBOW','TEE','REDUCING TEE','CON. REDUCER','ECC. REDUCER','CAP'];
+const TWO_SIZE_PARTS=new Set(['REDUCING TEE','CON. REDUCER','ECC. REDUCER','REDUCER','SOCKOLET','THREDOLET','WELDOLET','OLET']);
+function sectionForPart(part,sections){
+  if(GENERIC_FITTING_PARTS.includes(part)&&sections[GENERIC_FITTING_SECTION])return GENERIC_FITTING_SECTION;
+  if(part==='REDUCER'&&sections[GENERIC_FITTING_SECTION])return GENERIC_FITTING_SECTION;
+  return part;
+}
+function needsSmallSize(part){return TWO_SIZE_PARTS.has(part);}
+function normalizeClass(v){return String(v||'').replace(/ANSI\s*/i,'').replace(/API\s*/i,'').replace(/CL\.?\s*/i,'').trim();}
+function normalizeSchedule(v){v=String(v||'').trim();if(!v)return'';return v.replace(/SCH\.\s*/i,'SCH').replace(/SCH\s+/i,'SCH').replace(/STD/i,'STD').replace(/XXS/i,'XXS').replace(/XS/i,'XS');}
+function normalizeRef(v){return String(v||'').trim().replace(/\s+/g,' ');}
+function fmtMat(v){return String(v||'').trim().replace(/GR\.\s*/ig,'-').replace(/Gr\.\s*/g,'-').replace(/TYPE\s*/ig,'TYPE ').replace(/\s+/g,' ');}
+function cleanDash(v){return String(v||'').trim().replace(/\s*[-â€“]\s*/g,'-').replace(/\s+/g,' ');}
+function pipeSpec(cd,sz){const r=getRow(cd.sections,'PIPE',sz);if(!r)return{};return{row:r,sch:normalizeSchedule(r.wall_thick),mat:fmtMat(r.material),prod:cleanDash(r.product),end:cleanDash(r.end),ref:normalizeRef(r.ref)};}
+function fittingRow(cd,part,sz){return getRow(cd.sections,sectionForPart(part,cd.sections),sz);}
+function fittingLabel(part){if(part==='REDUCING TEE')return'RED. TEE';if(part==='CON. REDUCER')return'CON. REDUCER';if(part==='ECC. REDUCER')return'ECC. REDUCER';return part;}
+function sizeWithSchedule(cd,sz){const ps=pipeSpec(cd,sz);return sz+'"'+(ps.sch?'-'+ps.sch:'');}
+function classPrefix(cls){cls=normalizeClass(cls);if(!cls)return'';return 'CL.'+cls;}
 
-function buildDesc(plant,cid,sz,part){const cd=PMC_DATA[plant]?.[cid];if(!cd)return'';const row=getRow(cd.sections,part,sz);if(!row)return'';const S=sz+'"';
-const mat=row.material||'',prod=row.product||'',end=row.end||'',wt=row.wall_thick||'',ref=row.ref||'',cls=row.class||'',tf=row.type_face||'',bt=row.body_trim||'',et=row.end_type||'',vn=row.valve_no||'';
-if(part==='PIPE')return[S+'-'+wt+' PIPE',mat,prod,end,ref].filter(Boolean).join(', ');
-if(part==='ELBOW/TEE/REDUCER/CAP')return[S+'-'+wt+' FITTING',mat,prod,end,ref].filter(Boolean).join(', ');
-if(part==='SCREWED CAP')return[S+'-CL.'+wt+' CAP',mat,'SCRD',ref].filter(Boolean).join(', ');
-if(part==='FULL COUPLING'||part==='HALF COUPLING'||part==='COUPLING'){const t=part.includes('FULL')?'FULL':part.includes('HALF')?'HALF':prod;return[S+'-CL.'+wt+' COUPLING',mat,end||'SW',t,ref].filter(Boolean).join(', ');}
-if(part==='UNION')return[S+' UNION',mat,end,'CL.'+wt,ref].filter(Boolean).join(', ');
-if(part==='FLANGE')return[S+'-CL. '+cls+' FLANGE',mat,tf,ref].filter(Boolean).join(', ');
-if(part==='BLIND FLANGE')return[S+'-CL. '+cls+' BLIND FLANGE',mat,tf||ref].filter(Boolean).join(', ');
+function buildDesc(plant,cid,sz,part,smallSz){const cd=PMC_DATA[plant]?.[cid];if(!cd)return'';const sec=sectionForPart(part,cd.sections);const row=getRow(cd.sections,sec,sz);if(!row)return'';const S=sz+'"';
+const mat=fmtMat(row.material||row.body_trim||''),prod=cleanDash(row.product||''),end=cleanDash(row.end||row.end_type||''),wt=normalizeSchedule(row.wall_thick||''),ref=normalizeRef(row.ref||''),cls=normalizeClass(row.class||''),tf=cleanDash(row.type_face||''),bt=fmtMat(row.body_trim||''),et=cleanDash(row.end_type||''),vn=row.valve_no||'';
+if(part==='PIPE'){const ps=pipeSpec(cd,sz);return[sizeWithSchedule(cd,sz)+' PIPE',ps.mat,ps.prod,ps.end,ps.ref].filter(Boolean).join(', ');}
+if(sec===GENERIC_FITTING_SECTION){
+  const label=fittingLabel(part);
+  const rowRef=ref||normalizeRef(row.wall_thick||'');
+  const rowEnd=end==='BE'?'BW':end;
+  if(needsSmallSize(part)){
+    if(!smallSz)return'';
+    return[sizeWithSchedule(cd,sz)+'*'+sizeWithSchedule(cd,smallSz)+' '+label,mat,prod,rowEnd,rowRef].filter(Boolean).join(', ');
+  }
+  return[sizeWithSchedule(cd,sz)+' '+label,mat,prod,rowEnd,rowRef].filter(Boolean).join(', ');
+}
+if(part==='SCREWED CAP')return[S+'-'+classPrefix(wt)+' CAP',mat,'SCRD',ref].filter(Boolean).join(', ');
+if(part==='FULL COUPLING'||part==='HALF COUPLING'||part==='COUPLING'){const t=part.includes('FULL')?'FULL':part.includes('HALF')?'HALF':prod;return[S+'-'+classPrefix(wt)+' COUPLING',mat,end||'SW',t,ref].filter(Boolean).join(', ');}
+if(part==='UNION')return[S+' UNION',mat,end,classPrefix(wt),ref].filter(Boolean).join(', ');
+if(part==='FLANGE')return[S+'-'+classPrefix(cls)+' FLANGE',mat,tf,ref].filter(Boolean).join(', ');
+if(part==='BLIND FLANGE')return[S+'-'+classPrefix(cls)+' BLIND FLANGE',mat,tf||ref].filter(Boolean).join(', ');
 if(part==='STUB END')return[S+' STUB END',mat,end||cls,ref].filter(Boolean).join(', ');
-if(part==='GASKET')return[S+'-CL. '+cls+' GASKET',mat,tf,'THK:'+wt,ref].filter(Boolean).join(', ');
-if(part==='BOLT/NUT')return[S+'-CL. '+cls+' BOLT & NUT',mat,row.type||'S.BOLT/HEX.NUT',ref].filter(Boolean).join(', ');
-return[S+'-CL. '+cls+' '+part,bt||mat,et,vn?'V/N:'+vn:'',ref].filter(Boolean).join(', ');}
+if(part==='GASKET')return[S+'-'+classPrefix(cls)+' GASKET',mat,tf,wt?'THK:'+wt:'',ref].filter(Boolean).join(', ');
+if(part==='BOLT/NUT')return[S+'-'+classPrefix(cls)+' BOLT & NUT',mat,row.type||'S.BOLT/HEX.NUT',ref].filter(Boolean).join(', ');
+if(needsSmallSize(part)){
+  if(!smallSz)return'';
+  return[smallSz+'"*'+S+'-'+classPrefix(cls)+' '+part,bt||mat,et,vn?'V/N:'+vn:'',ref].filter(Boolean).join(', ');
+}
+return[S+'-'+classPrefix(cls)+' '+part,bt||mat,et,vn?'V/N:'+vn:'',ref].filter(Boolean).join(', ');}
 
 function defUnit(p){if(p==='PIPE')return'M';if(p==='BOLT/NUT')return'SET';return'EA';}
 function escH(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -302,16 +342,18 @@ function showPage(p){currentPage=p;document.querySelectorAll('.page').forEach(el
 /* SELECTORS */
 function onPlantChange(){populateClasses();onClassChange();}
 function populateClasses(){const pl=document.getElementById('sel-plant').value;const sl=document.getElementById('sel-class');const cls=Object.keys(PMC_DATA[pl]||{}).sort();sl.innerHTML='<option value="">&#8212; Select Class &#8212;</option>'+cls.map(c=>'<option value="'+c+'">'+c+'</option>').join('');}
-function onClassChange(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value;const svc=PMC_DATA[pl]?.[cid]?.service||'';const sb=document.getElementById('svc-badge');if(svc){sb.style.display='block';sb.textContent='Service: '+svc;}else{sb.style.display='none';}const ss=document.getElementById('sel-size');ss.innerHTML='<option value="">&#8212; Select Size &#8212;</option>';if(cid)getSizes(pl,cid).forEach(s=>ss.innerHTML+='<option value="'+s+'">'+s+'"</option>');document.getElementById('sel-part').innerHTML='<option value="">&#8212; Select Part &#8212;</option>';updatePreview();}
-function onSizeChange(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value;const sp=document.getElementById('sel-part');sp.innerHTML='<option value="">&#8212; Select Part &#8212;</option>';if(cid&&sz){const secs=PMC_DATA[pl]?.[cid]?.sections||{};Object.keys(secs).forEach(s=>{if(getRow(secs,s,sz))sp.innerHTML+='<option value="'+s+'">'+s+'</option>';});}updatePreview();}
-function onPartChange(){const p=document.getElementById('sel-part').value;if(p)document.getElementById('sel-unit').value=defUnit(p);updatePreview();}
-function updatePreview(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value;const el=document.getElementById('desc-preview');if(!cid||!sz||!pt){el.textContent='Select class, size and part above';el.className='desc-box empty';currentDesc='';return;}const d=buildDesc(pl,cid,sz,pt);currentDesc=d;el.textContent=d||'No specification found for this combination';el.className=d?'desc-box':'desc-box empty';}
+function onClassChange(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value;const svc=PMC_DATA[pl]?.[cid]?.service||'';const sb=document.getElementById('svc-badge');if(svc){sb.style.display='block';sb.textContent='Service: '+svc;}else{sb.style.display='none';}const ss=document.getElementById('sel-size');ss.innerHTML='<option value="">&#8212; Select Size &#8212;</option>';if(cid)getSizes(pl,cid).forEach(s=>ss.innerHTML+='<option value="'+s+'">'+s+'"</option>');document.getElementById('sel-part').innerHTML='<option value="">&#8212; Select Part &#8212;</option>';hideSmallSize();updatePreview();}
+function onSizeChange(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value;const sp=document.getElementById('sel-part');sp.innerHTML='<option value="">&#8212; Select Part &#8212;</option>';if(cid&&sz){const secs=PMC_DATA[pl]?.[cid]?.sections||{};Object.keys(secs).forEach(s=>{if(s===GENERIC_FITTING_SECTION&&getRow(secs,s,sz)){GENERIC_FITTING_PARTS.forEach(fp=>sp.innerHTML+='<option value="'+fp+'">'+fp+'</option>');}else if(getRow(secs,s,sz)){sp.innerHTML+='<option value="'+s+'">'+s+'</option>';}});}hideSmallSize();updatePreview();}
+function onPartChange(){const p=document.getElementById('sel-part').value;if(p)document.getElementById('sel-unit').value=defUnit(p);setupSmallSize();updatePreview();}
+function hideSmallSize(){const f=document.getElementById('small-size-field'),s=document.getElementById('sel-size-small');if(f)f.style.display='none';if(s)s.innerHTML='<option value="">&#8212; Select Small Size &#8212;</option>';}
+function setupSmallSize(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,large=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value;const f=document.getElementById('small-size-field'),s=document.getElementById('sel-size-small');if(!f||!s)return;if(!needsSmallSize(pt)){hideSmallSize();return;}const sizes=getSizes(pl,cid).filter(x=>!large||fracVal(x)<=fracVal(large));s.innerHTML='<option value="">&#8212; Select Small Size &#8212;</option>'+sizes.map(x=>'<option value="'+x+'">'+x+'"</option>').join('');f.style.display='block';}
+function updatePreview(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value,small=document.getElementById('sel-size-small')?.value||'';const el=document.getElementById('desc-preview');if(!cid||!sz||!pt){el.textContent='Select class, size and part above';el.className='desc-box empty';currentDesc='';return;}if(needsSmallSize(pt)&&!small){el.textContent='Select small / branch size for '+pt;el.className='desc-box empty';currentDesc='';return;}const d=buildDesc(pl,cid,sz,pt,small);currentDesc=d;el.textContent=d||'No specification found for this combination';el.className=d?'desc-box':'desc-box empty';}
 
 /* ADD */
-function addItem(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value;if(!cid){showToast('Select a pipe class',true);return;}if(!sz){showToast('Select a nominal size',true);return;}if(!pt){showToast('Select a part',true);return;}if(!currentDesc){showToast('No specification found',true);return;}itemSeq++;mtoItems.push({id:itemSeq,plant:pl,classId:cid,size:sz,part:pt,description:currentDesc,qty:document.getElementById('inp-qty').value||'1',unit:document.getElementById('sel-unit').value,remarks:document.getElementById('inp-remarks').value.trim()});renderMTO();autoSave();showToast('Added to MTO \u2713');document.getElementById('inp-qty').value='';document.getElementById('inp-remarks').value='';}
+function addItem(){const pl=document.getElementById('sel-plant').value,cid=document.getElementById('sel-class').value,sz=document.getElementById('sel-size').value,pt=document.getElementById('sel-part').value,small=document.getElementById('sel-size-small')?.value||'';if(!cid){showToast('Select a pipe class',true);return;}if(!sz){showToast('Select a nominal size',true);return;}if(!pt){showToast('Select a part',true);return;}if(needsSmallSize(pt)&&!small){showToast('Select small / branch size',true);return;}if(!currentDesc){showToast('No specification found',true);return;}itemSeq++;mtoItems.push({id:itemSeq,plant:pl,classId:cid,size:sz,sizeSmall:small,part:pt,description:currentDesc,qty:document.getElementById('inp-qty').value||'1',unit:document.getElementById('sel-unit').value,remarks:document.getElementById('inp-remarks').value.trim()});renderMTO();autoSave();showToast('Added to MTO \u2713');document.getElementById('inp-qty').value='';document.getElementById('inp-remarks').value='';}
 
 /* RENDER MTO */
-function renderMTO(){const list=document.getElementById('mto-list'),empty=document.getElementById('mto-empty');document.getElementById('item-count').textContent=mtoItems.length;document.getElementById('mto-title-display').textContent=document.getElementById('mto-title').value||'';if(!mtoItems.length){list.innerHTML='';list.appendChild(empty);empty.style.display='block';return;}empty.style.display='none';const card=document.createElement('div');card.className='card';card.innerHTML=mtoItems.map((item,i)=>'<div class="mto-row"><div class="mto-row-head"><span class="mto-row-no">'+(i+1)+'</span><div class="mto-row-tags"><span class="badge b-'+item.plant.toLowerCase()+'">'+escH(item.plant)+'</span><span class="badge b-class">'+escH(item.classId)+'</span><span class="badge b-size">'+escH(item.size)+'"</span></div><button class="mto-row-del" onclick="removeItem('+item.id+')">&#10005;</button></div><div class="mto-desc">'+escH(item.description)+'</div><div class="mto-row-foot"><div class="qty-wrap"><label>Qty</label><input type="number" min="0" step="0.01" value="'+escH(item.qty)+'" onchange="updateItem('+item.id+',\'qty\',this.value)"><span class="unit-lbl">'+escH(item.unit)+'</span></div><div class="rmk-wrap"><input type="text" value="'+escH(item.remarks)+'" onchange="updateItem('+item.id+',\'remarks\',this.value)" placeholder="Remarks..."></div></div></div>').join('');list.innerHTML='';list.appendChild(card);}
+function renderMTO(){const list=document.getElementById('mto-list'),empty=document.getElementById('mto-empty');document.getElementById('item-count').textContent=mtoItems.length;document.getElementById('mto-title-display').textContent=document.getElementById('mto-title').value||'';if(!mtoItems.length){list.innerHTML='';list.appendChild(empty);empty.style.display='block';return;}empty.style.display='none';const card=document.createElement('div');card.className='card';card.innerHTML=mtoItems.map((item,i)=>'<div class="mto-row"><div class="mto-row-head"><span class="mto-row-no">'+(i+1)+'</span><div class="mto-row-tags"><span class="badge b-'+item.plant.toLowerCase()+'">'+escH(item.plant)+'</span><span class="badge b-class">'+escH(item.classId)+'</span><span class="badge b-size">'+escH(item.size)+(item.sizeSmall?'" x '+escH(item.sizeSmall):'')+'"</span></div><button class="mto-row-del" onclick="removeItem('+item.id+')">&#10005;</button></div><div class="mto-desc">'+escH(item.description)+'</div><div class="mto-row-foot"><div class="qty-wrap"><label>Qty</label><input type="number" min="0" step="0.01" value="'+escH(item.qty)+'" onchange="updateItem('+item.id+',\'qty\',this.value)"><span class="unit-lbl">'+escH(item.unit)+'</span></div><div class="rmk-wrap"><input type="text" value="'+escH(item.remarks)+'" onchange="updateItem('+item.id+',\'remarks\',this.value)" placeholder="Remarks..."></div></div></div>').join('');list.innerHTML='';list.appendChild(card);}
 
 function updateItem(id,f,v){const i=mtoItems.find(x=>x.id===id);if(i){i[f]=v;autoSave();}}
 function removeItem(id){mtoItems=mtoItems.filter(i=>i.id!==id);renderMTO();autoSave();showToast('Item removed');}
@@ -322,7 +364,7 @@ function autoSave(){try{const s={items:mtoItems,seq:itemSeq,title:document.getEl
 function loadSaved(){try{const raw=localStorage.getItem('pim_mto_v2');if(!raw)return;const s=JSON.parse(raw);mtoItems=s.items||[];itemSeq=s.seq||mtoItems.length;['title','docno','prepby','date'].forEach(k=>{if(s[k])document.getElementById('mto-'+k).value=s[k];});['iso','lineno','pid','rev'].forEach(k=>{if(s[k])document.getElementById('tbl-'+k).value=s[k];});renderMTO();}catch(e){}}
 
 /* EXPORT */
-function exportCSV(){if(!mtoItems.length){showToast('No items to export',true);return;}const title=document.getElementById('mto-title').value||'MTO';const iso=document.getElementById('tbl-iso').value,ln=document.getElementById('tbl-lineno').value,pid=document.getElementById('tbl-pid').value,rev=document.getElementById('tbl-rev').value,prepby=document.getElementById('mto-prepby').value,date=document.getElementById('mto-date').value;const hdr=['No.','Plant','Pipe Class','Size (NPS)','Part','Description','Qty','Unit','ISO Drawing','Line No.','P&ID No.','Rev.','Remarks'];const rows=mtoItems.map((item,i)=>[i+1,item.plant,item.classId,item.size+'"',item.part,item.description,item.qty,item.unit,iso,ln,pid,rev,item.remarks]);const csv=[['DETAIL MTO PIPING MATERIAL'],['Title: '+title,'Doc No: '+document.getElementById('mto-docno').value,'Prepared By: '+prepby,'Date: '+date],[],hdr,...rows].map(r=>r.map(c=>'"'+String(c||'').replace(/"/g,'""')+'"').join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(title.replace(/[^a-zA-Z0-9_\-]/g,'_')||'MTO')+'.csv';a.click();URL.revokeObjectURL(url);showToast('Exported \u2713');}
+function exportCSV(){if(!mtoItems.length){showToast('No items to export',true);return;}const title=document.getElementById('mto-title').value||'MTO';const iso=document.getElementById('tbl-iso').value,ln=document.getElementById('tbl-lineno').value,pid=document.getElementById('tbl-pid').value,rev=document.getElementById('tbl-rev').value,prepby=document.getElementById('mto-prepby').value,date=document.getElementById('mto-date').value;const hdr=['No.','Plant','Pipe Class','Large Size (NPS)','Small Size (NPS)','Part','Description','Qty','Unit','ISO Drawing','Line No.','P&ID No.','Rev.','Remarks'];const rows=mtoItems.map((item,i)=>[i+1,item.plant,item.classId,item.size+'"',item.sizeSmall?item.sizeSmall+'"':'',item.part,item.description,item.qty,item.unit,iso,ln,pid,rev,item.remarks]);const csv=[['DETAIL MTO PIPING MATERIAL'],['Title: '+title,'Doc No: '+document.getElementById('mto-docno').value,'Prepared By: '+prepby,'Date: '+date],[],hdr,...rows].map(r=>r.map(c=>'"'+String(c||'').replace(/"/g,'""')+'"').join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(title.replace(/[^a-zA-Z0-9_\-]/g,'_')||'MTO')+'.csv';a.click();URL.revokeObjectURL(url);showToast('Exported \u2713');}
 
 /* TOAST */
 function showToast(msg,isErr){const el=document.getElementById('toast');el.textContent=msg;el.className='toast'+(isErr?' err':'');void el.offsetWidth;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500);}
